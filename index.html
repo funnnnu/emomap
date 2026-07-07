@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6c34c">
+<title>エモマップ</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>エモマップ</h1>
+</header>
+
+<main>
+  <section id="screen-record" class="screen active">
+    <p class="prompt">いまの気分は？</p>
+    <div id="emotion-grid" class="emotion-grid"></div>
+    <div id="today-logs" class="today-logs"></div>
+  </section>
+
+  <section id="screen-stats" class="screen">
+    <div id="stats-content"></div>
+  </section>
+
+  <section id="screen-settings" class="screen">
+    <h2>感情の編集</h2>
+    <ul id="emotion-list" class="emotion-list"></ul>
+    <form id="emotion-add-form" class="emotion-add">
+      <input id="new-emoji" type="text" placeholder="絵文字" maxlength="8" required>
+      <input id="new-label" type="text" placeholder="ラベル" maxlength="10" required>
+      <button type="submit">追加</button>
+    </form>
+    <div class="settings-actions">
+      <button id="reset-emotions" class="danger-outline">初期セットに戻す</button>
+      <button id="export-logs">記録をエクスポート (JSON)</button>
+      <button id="delete-all-logs" class="danger-outline">全記録を削除</button>
+    </div>
+    <p class="note">記録はすべてこの端末内に保存されます。位置情報は約1kmに丸めた値のみ記録します。</p>
+  </section>
+</main>
+
+<nav>
+  <button data-screen="screen-record" class="active">✏️ 記録</button>
+  <button data-screen="screen-stats">📊 統計</button>
+  <button data-screen="screen-settings">⚙️ 設定</button>
+</nav>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

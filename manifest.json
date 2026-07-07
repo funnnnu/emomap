@@ -1,0 +1,12 @@
+{
+  "name": "エモマップ",
+  "short_name": "エモマップ",
+  "description": "感情をワンタップで記録。天気・場所との相関が見えるセルフケアアプリ",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#faf8f4",
+  "theme_color": "#f6c34c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
