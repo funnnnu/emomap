@@ -168,7 +168,10 @@ function renderRecordScreen() {
   });
 }
 
-function fmt(v) { return (v >= 0 ? "+" : "") + v.toFixed(1); }
+function fmt(v) {
+  if (Math.abs(v) < 0.05) v = 0;
+  return (v >= 0 ? "+" : "") + v.toFixed(1);
+}
 
 // ---- 統計画面 ----
 function avg(arr) { return arr.reduce((s, v) => s + v, 0) / arr.length; }

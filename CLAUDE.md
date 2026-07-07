@@ -19,11 +19,16 @@
 - `app.js` — 全ロジック。localStorage キー: `emomap_emotions`, `emomap_logs`
 - `sw.js` — アプリシェルのキャッシュのみ（外部APIはキャッシュしない）
 
+## 公開先
+
+- リポジトリ: https://github.com/funnnnu/emomap
+- 本番: https://funnnnu.github.io/emomap/ （GitHub Pages, mainブランチ直配信）
+
 ## 次タスク
 
-1. GitHub リポジトリ作成（gh CLIなし → funnnnu がWebで作成、push は Git Credential Manager 経由）+ GitHub Pages 公開
-2. 実機（スマホ）でホーム画面追加・位置情報許可の動作確認
-3. 週次レポート画面 / 気圧との相関表示
+1. スマホ実機でホーム画面追加・位置情報許可・天気付与の動作確認
+2. プライバシーポリシーページ（位置情報の利用目的+将来の匿名加工情報提供を明記）
+3. 週次レポート / 記録リマインド（Web Push）検討
 
 ## リリース前チェック
 
