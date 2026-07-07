@@ -17,8 +17,20 @@
 
 <main>
   <section id="screen-record" class="screen active">
-    <p class="prompt">いまの気分は？</p>
-    <div id="emotion-grid" class="emotion-grid"></div>
+    <p class="prompt">いまの気分と体調をタップ</p>
+    <div class="pad-wrap">
+      <span class="axis-label ax-top">体調よい</span>
+      <span class="axis-label ax-bottom">体調わるい</span>
+      <span class="axis-label ax-left">気分<br>暗い</span>
+      <span class="axis-label ax-right">気分<br>明るい</span>
+      <div id="mood-pad" class="mood-pad">
+        <span class="quad q-tl">😕</span>
+        <span class="quad q-tr">😊</span>
+        <span class="quad q-bl">😖</span>
+        <span class="quad q-br">🤒</span>
+      </div>
+    </div>
+    <p id="limit-msg" class="limit-msg"></p>
     <div id="today-logs" class="today-logs"></div>
   </section>
 
@@ -27,19 +39,12 @@
   </section>
 
   <section id="screen-settings" class="screen">
-    <h2>感情の編集</h2>
-    <ul id="emotion-list" class="emotion-list"></ul>
-    <form id="emotion-add-form" class="emotion-add">
-      <input id="new-emoji" type="text" placeholder="絵文字" maxlength="8" required>
-      <input id="new-label" type="text" placeholder="ラベル" maxlength="10" required>
-      <button type="submit">追加</button>
-    </form>
+    <h2>データ管理</h2>
     <div class="settings-actions">
-      <button id="reset-emotions" class="danger-outline">初期セットに戻す</button>
       <button id="export-logs">記録をエクスポート (JSON)</button>
       <button id="delete-all-logs" class="danger-outline">全記録を削除</button>
     </div>
-    <p class="note">記録はすべてこの端末内に保存されます。位置情報は約1kmに丸めた値のみ記録します。</p>
+    <p class="note">記録はすべてこの端末内に保存されます。位置情報は約1kmに丸めた値のみ記録します。記録は1日3回までです。</p>
   </section>
 </main>
 

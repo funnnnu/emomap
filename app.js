@@ -1,38 +1,45 @@
 "use strict";
 
-// ---- 感情マスタ（設定画面から追加・削除可能。ログには絵文字とラベルのスナップショットを保存
-//      するため、後からマスタを変更しても過去の記録は壊れない） ----
-const DEFAULT_EMOTIONS = [
-  { id: "happy",   emoji: "😊", label: "うれしい", color: "#f6c34c" },
-  { id: "neutral", emoji: "😐", label: "ふつう",   color: "#9aa5b1" },
-  { id: "sad",     emoji: "😔", label: "かなしい", color: "#5b8dd9" },
-  { id: "angry",   emoji: "😡", label: "イライラ", color: "#e05a4e" },
-  { id: "tired",   emoji: "😴", label: "つかれた", color: "#8e7cc3" },
-];
-const EXTRA_COLORS = ["#4caf7d", "#e08cc0", "#c9a15a", "#5bbcd9", "#a3b34c"];
-
-const LS_EMOTIONS = "emomap_emotions";
+// ---- 記録は2次元連続値: mood(気分 -1..+1, 暗い..明るい) × cond(体調 -1..+1, わるい..よい) ----
+const DAILY_LIMIT = 3;
 const LS_LOGS = "emomap_logs";
-
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
-// ---- storage ----
-function loadEmotions() {
-  try {
-    const v = JSON.parse(localStorage.getItem(LS_EMOTIONS));
-    if (Array.isArray(v) && v.length) return v;
-  } catch (e) {}
-  return DEFAULT_EMOTIONS.slice();
+// 旧絵文字ログ(emotionId)を2軸値に変換する移行テーブル
+const LEGACY_MAP = {
+  happy: { mood: 0.7, cond: 0.4 },
+  neutral: { mood: 0, cond: 0 },
+  sad: { mood: -0.7, cond: -0.2 },
+  angry: { mood: -0.6, cond: 0.1 },
+  tired: { mood: -0.2, cond: -0.7 },
+};
+
+function quadrant(mood, cond) {
+  if (mood >= 0 && cond >= 0) return { emoji: "😊", label: "心も体も好調" };
+  if (mood >= 0) return { emoji: "🤒", label: "気分はいいけど体しんどい" };
+  if (cond >= 0) return { emoji: "😕", label: "体は元気、心は曇り" };
+  return { emoji: "😖", label: "心も体もしんどい" };
 }
-function saveEmotions(list) { localStorage.setItem(LS_EMOTIONS, JSON.stringify(list)); }
+
+// ---- storage ----
 function loadLogs() {
   try {
     const v = JSON.parse(localStorage.getItem(LS_LOGS));
-    if (Array.isArray(v)) return v;
+    if (Array.isArray(v)) {
+      // 旧形式ログの移行（mood未設定 & 既知のemotionId）
+      v.forEach((l) => {
+        if (l.mood == null && LEGACY_MAP[l.emotionId]) Object.assign(l, LEGACY_MAP[l.emotionId]);
+      });
+      return v.filter((l) => l.mood != null);
+    }
   } catch (e) {}
   return [];
 }
 function saveLogs(logs) { localStorage.setItem(LS_LOGS, JSON.stringify(logs)); }
+function todayLogs(logs) {
+  const today = new Date().toDateString();
+  return logs.filter((l) => new Date(l.ts).toDateString() === today);
+}
 
 // ---- 位置（約1kmメッシュに丸めてから保持。生の緯度経度は保存しない） ----
 function toMesh(lat, lon) {
@@ -64,32 +71,25 @@ async function fetchWeather(mesh) {
   const res = await fetch(url);
   if (!res.ok) throw new Error("weather fetch failed");
   const d = (await res.json()).current;
-  return {
-    weather: weatherCategory(d.weather_code),
-    temp: d.temperature_2m,
-    pressure: d.surface_pressure,
-  };
+  return { weather: weatherCategory(d.weather_code), temp: d.temperature_2m, pressure: d.surface_pressure };
 }
 
 // ---- 記録 ----
-function record(emotion) {
+function record(mood, cond) {
   const logs = loadLogs();
+  if (todayLogs(logs).length >= DAILY_LIMIT) { renderRecordScreen(); return; }
   const log = {
     id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
-    emotionId: emotion.id,
-    emoji: emotion.emoji,
-    label: emotion.label,
-    intensity: 2,
+    mood: Math.round(mood * 100) / 100,
+    cond: Math.round(cond * 100) / 100,
     ts: new Date().toISOString(),
-    mesh: null,
-    weather: null,
-    temp: null,
-    pressure: null,
+    mesh: null, weather: null, temp: null, pressure: null,
   };
   logs.push(log);
   saveLogs(logs);
-  renderTodayLogs();
-  showToast(log);
+  renderRecordScreen();
+  const q = quadrant(mood, cond);
+  showToast(`${q.emoji} ${q.label}｜記録しました`);
   enrich(log.id);
 }
 
@@ -104,100 +104,132 @@ async function enrich(logId) {
   log.mesh = mesh;
   if (wx) Object.assign(log, wx);
   saveLogs(logs);
-  renderTodayLogs();
-}
-
-function setIntensity(logId, intensity) {
-  const logs = loadLogs();
-  const log = logs.find((l) => l.id === logId);
-  if (!log) return;
-  log.intensity = intensity;
-  saveLogs(logs);
+  renderRecordScreen();
 }
 
 // ---- toast ----
 let toastTimer = null;
-function showToast(log) {
+function showToast(text) {
   const toast = document.getElementById("toast");
-  toast.innerHTML = "";
-  toast.append(`${log.emoji} 記録しました　強さ:`);
-  [1, 2, 3].forEach((n) => {
-    const b = document.createElement("button");
-    b.textContent = n;
-    if (n === log.intensity) b.classList.add("selected");
-    b.onclick = () => {
-      setIntensity(log.id, n);
-      toast.querySelectorAll("button").forEach((x) => x.classList.remove("selected"));
-      b.classList.add("selected");
-    };
-    toast.append(b);
-  });
+  toast.textContent = text;
   toast.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.add("hidden"), 5000);
+  toastTimer = setTimeout(() => toast.classList.add("hidden"), 4000);
 }
 
 // ---- 記録画面 ----
-function renderEmotionGrid() {
-  const grid = document.getElementById("emotion-grid");
-  grid.innerHTML = "";
-  loadEmotions().forEach((em) => {
-    const b = document.createElement("button");
-    b.className = "emotion-btn";
-    b.innerHTML = `<span class="emoji">${escapeHtml(em.emoji)}</span><span class="label">${escapeHtml(em.label)}</span>`;
-    b.onclick = () => record(em);
-    grid.append(b);
+function setupPad() {
+  const pad = document.getElementById("mood-pad");
+  pad.addEventListener("pointerdown", (ev) => {
+    const r = pad.getBoundingClientRect();
+    const mood = ((ev.clientX - r.left) / r.width) * 2 - 1;
+    const cond = 1 - ((ev.clientY - r.top) / r.height) * 2;
+    record(Math.max(-1, Math.min(1, mood)), Math.max(-1, Math.min(1, cond)));
   });
 }
 
-function renderTodayLogs() {
+function renderRecordScreen() {
+  const logs = loadLogs();
+  const today = todayLogs(logs);
+  const pad = document.getElementById("mood-pad");
+  const limitMsg = document.getElementById("limit-msg");
+
+  // 今日の記録を点で表示
+  pad.querySelectorAll(".dot").forEach((d) => d.remove());
+  today.forEach((l) => {
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.left = `${((l.mood + 1) / 2) * 100}%`;
+    dot.style.top = `${((1 - l.cond) / 2) * 100}%`;
+    pad.append(dot);
+  });
+
+  const remaining = DAILY_LIMIT - today.length;
+  if (remaining <= 0) {
+    pad.classList.add("disabled");
+    limitMsg.textContent = "今日の記録は3回までです。また明日！";
+  } else {
+    pad.classList.remove("disabled");
+    limitMsg.textContent = `今日はあと${remaining}回記録できます`;
+  }
+
   const box = document.getElementById("today-logs");
-  const today = new Date().toDateString();
-  const logs = loadLogs().filter((l) => new Date(l.ts).toDateString() === today).reverse();
-  if (!logs.length) { box.innerHTML = ""; return; }
+  if (!today.length) { box.innerHTML = ""; return; }
   box.innerHTML = "<h3>今日の記録</h3>";
-  logs.forEach((l) => {
+  today.slice().reverse().forEach((l) => {
     const t = new Date(l.ts);
     const time = `${t.getHours()}:${String(t.getMinutes()).padStart(2, "0")}`;
     const wx = l.weather ? `${l.weather} ${l.temp}°C` : "";
+    const q = quadrant(l.mood, l.cond);
     const div = document.createElement("div");
     div.className = "log-item";
-    div.innerHTML = `<span>${escapeHtml(l.emoji)}</span><span>${escapeHtml(l.label)}</span><span class="meta">${time}<br>${wx}</span>`;
+    div.innerHTML = `<span>${q.emoji}</span><span>気分 ${fmt(l.mood)} / 体調 ${fmt(l.cond)}</span><span class="meta">${time}<br>${wx}</span>`;
     box.append(div);
   });
 }
 
-// ---- 統計画面 ----
-function emotionColor(log, emotions) {
-  const em = emotions.find((e) => e.id === log.emotionId);
-  return em ? em.color : "#aaa";
-}
+function fmt(v) { return (v >= 0 ? "+" : "") + v.toFixed(1); }
 
-function groupBars(logs, keyFn, keys) {
-  const emotions = loadEmotions();
+// ---- 統計画面 ----
+function avg(arr) { return arr.reduce((s, v) => s + v, 0) / arr.length; }
+
+// key別に平均気分・平均体調を出す
+function groupAvg(logs, keyFn) {
   const groups = {};
-  keys.forEach((k) => (groups[k] = {}));
   logs.forEach((l) => {
     const k = keyFn(l);
     if (k == null) return;
-    if (!groups[k]) groups[k] = {};
-    const g = groups[k];
-    if (!g[l.emotionId]) g[l.emotionId] = { count: 0, log: l };
-    g[l.emotionId].count++;
+    (groups[k] = groups[k] || []).push(l);
   });
-  let html = "";
-  for (const k of Object.keys(groups)) {
+  return groups;
+}
+
+function signedBar(value, color) {
+  const pct = Math.abs(value) * 50;
+  const side = value >= 0 ? `left:50%` : `left:${50 - pct}%`;
+  return `<div class="sbar-track"><div class="sbar-center"></div><div class="sbar-fill" style="${side};width:${pct}%;background:${color}"></div></div>`;
+}
+
+function avgCard(title, groups, order) {
+  const keys = order ? order.filter((k) => groups[k]) : Object.keys(groups);
+  if (!keys.length) return "";
+  let rows = "";
+  keys.forEach((k) => {
     const g = groups[k];
-    const total = Object.values(g).reduce((s, v) => s + v.count, 0);
-    if (!total) continue;
-    let segs = "";
-    for (const v of Object.values(g)) {
-      const pct = (v.count / total) * 100;
-      segs += `<div class="bar-seg" style="width:${pct}%;background:${emotionColor(v.log, emotions)}" title="${escapeHtml(v.log.emoji)}×${v.count}"></div>`;
-    }
-    html += `<div class="bar-row"><span class="bar-label">${escapeHtml(k)}</span><div class="bar-track">${segs}</div><span class="bar-count">${total}</span></div>`;
+    rows += `<div class="avg-row"><span class="bar-label">${escapeHtml(k)}</span>` +
+      `<div class="sbar-pair">${signedBar(avg(g.map((l) => l.mood)), "var(--mood-c)")}${signedBar(avg(g.map((l) => l.cond)), "var(--cond-c)")}</div>` +
+      `<span class="bar-count">${g.length}</span></div>`;
+  });
+  return `<div class="stat-card"><h3>${title}</h3>${rows}</div>`;
+}
+
+// 「雨の日は気分が低め」のような影響インサイト
+function insights(logs) {
+  const out = [];
+  const withWx = logs.filter((l) => l.weather);
+  const rain = withWx.filter((l) => l.weather === "雨" || l.weather === "雷雨");
+  const fine = withWx.filter((l) => l.weather === "快晴" || l.weather === "晴れ");
+  if (rain.length >= 3 && fine.length >= 3) {
+    const d = avg(rain.map((l) => l.mood)) - avg(fine.map((l) => l.mood));
+    if (Math.abs(d) >= 0.15) out.push(`☔ 雨の日は晴れの日より気分が${d < 0 ? "低め" : "高め"}（${fmt(d)}）`);
   }
-  return html;
+  const withP = logs.filter((l) => l.pressure != null);
+  if (withP.length >= 6) {
+    const sorted = withP.slice().sort((a, b) => a.pressure - b.pressure);
+    const half = Math.floor(sorted.length / 2);
+    const low = sorted.slice(0, half), high = sorted.slice(-half);
+    const d = avg(low.map((l) => l.cond)) - avg(high.map((l) => l.cond));
+    if (Math.abs(d) >= 0.15) out.push(`🌀 気圧が低い日は体調が${d < 0 ? "低め" : "高め"}（${fmt(d)}）`);
+  }
+  const withT = logs.filter((l) => l.temp != null);
+  if (withT.length >= 6) {
+    const sorted = withT.slice().sort((a, b) => a.temp - b.temp);
+    const half = Math.floor(sorted.length / 2);
+    const cold = sorted.slice(0, half), hot = sorted.slice(-half);
+    const d = avg(hot.map((l) => l.mood)) - avg(cold.map((l) => l.mood));
+    if (Math.abs(d) >= 0.15) out.push(`🌡️ 気温が高い日は気分が${d < 0 ? "低め" : "高め"}（${fmt(d)}）`);
+  }
+  return out;
 }
 
 function renderStats() {
@@ -207,93 +239,32 @@ function renderStats() {
     box.innerHTML = `<p class="empty">まだ記録がありません。<br>まずは今の気分をタップ！</p>`;
     return;
   }
-  const emotions = loadEmotions();
 
-  // 感情ごとの合計
-  const totals = {};
-  logs.forEach((l) => {
-    if (!totals[l.emotionId]) totals[l.emotionId] = { count: 0, log: l };
-    totals[l.emotionId].count++;
-  });
-  const max = Math.max(...Object.values(totals).map((v) => v.count));
-  let totalHtml = "";
-  Object.values(totals)
-    .sort((a, b) => b.count - a.count)
-    .forEach((v) => {
-      const pct = (v.count / max) * 100;
-      totalHtml += `<div class="bar-row"><span class="bar-label">${escapeHtml(v.log.emoji)} ${escapeHtml(v.log.label)}</span><div class="bar-track"><div class="bar-seg" style="width:${pct}%;background:${emotionColor(v.log, emotions)}"></div></div><span class="bar-count">${v.count}</span></div>`;
-    });
+  const summary =
+    `<div class="stat-card"><h3>ぜんぶの記録（${logs.length}件）の平均</h3>` +
+    `<div class="avg-row"><span class="bar-label">気分</span><div class="sbar-pair">${signedBar(avg(logs.map((l) => l.mood)), "var(--mood-c)")}</div><span class="bar-count">${fmt(avg(logs.map((l) => l.mood)))}</span></div>` +
+    `<div class="avg-row"><span class="bar-label">体調</span><div class="sbar-pair">${signedBar(avg(logs.map((l) => l.cond)), "var(--cond-c)")}</div><span class="bar-count">${fmt(avg(logs.map((l) => l.cond)))}</span></div></div>`;
 
-  const weatherHtml = groupBars(logs, (l) => l.weather, []);
-  const weekdayHtml = groupBars(logs, (l) => WEEKDAYS[new Date(l.ts).getDay()], WEEKDAYS);
-  const hourHtml = groupBars(
-    logs,
-    (l) => {
-      const h = new Date(l.ts).getHours();
-      return h < 6 ? "深夜" : h < 12 ? "午前" : h < 18 ? "午後" : "夜";
-    },
+  const ins = insights(logs);
+  const insHtml = ins.length
+    ? `<div class="stat-card"><h3>あなたへの影響</h3>${ins.map((t) => `<p class="insight">${t}</p>`).join("")}</div>`
+    : "";
+
+  const byWeather = avgCard("天気べつ", groupAvg(logs, (l) => l.weather), ["快晴", "晴れ", "曇り", "霧", "雨", "雪", "雷雨"]);
+  const byWeekday = avgCard("曜日べつ", groupAvg(logs, (l) => WEEKDAYS[new Date(l.ts).getDay()]), WEEKDAYS);
+  const byHour = avgCard(
+    "時間帯べつ",
+    groupAvg(logs, (l) => { const h = new Date(l.ts).getHours(); return h < 6 ? "深夜" : h < 12 ? "午前" : h < 18 ? "午後" : "夜"; }),
     ["午前", "午後", "夜", "深夜"]
   );
 
-  const legend = emotions
-    .map((e) => `<span style="--c:${e.color}">${escapeHtml(e.emoji)} ${escapeHtml(e.label)}</span>`)
-    .join("");
+  const legend = `<div class="legend"><span style="--c:var(--mood-c)">気分</span><span style="--c:var(--cond-c)">体調</span><span>バーは -1〜+1、中央が0</span></div>`;
 
-  box.innerHTML =
-    `<div class="stat-card"><h3>ぜんぶの記録（${logs.length}件）</h3>${totalHtml}</div>` +
-    (weatherHtml ? `<div class="stat-card"><h3>天気べつ</h3>${weatherHtml}</div>` : "") +
-    `<div class="stat-card"><h3>曜日べつ</h3>${weekdayHtml}</div>` +
-    `<div class="stat-card"><h3>時間帯べつ</h3>${hourHtml}</div>` +
-    `<div class="legend">${legend}</div>`;
+  box.innerHTML = summary + insHtml + byWeather + byWeekday + byHour + legend;
 }
 
 // ---- 設定画面 ----
-function renderSettings() {
-  const list = document.getElementById("emotion-list");
-  const emotions = loadEmotions();
-  list.innerHTML = "";
-  emotions.forEach((em, i) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<span class="emoji">${escapeHtml(em.emoji)}</span><span>${escapeHtml(em.label)}</span>`;
-    const del = document.createElement("button");
-    del.textContent = "削除";
-    del.className = "danger-outline";
-    del.onclick = () => {
-      if (emotions.length <= 2) { alert("感情は2つ以上必要です"); return; }
-      emotions.splice(i, 1);
-      saveEmotions(emotions);
-      renderSettings();
-      renderEmotionGrid();
-    };
-    li.append(del);
-    list.append(li);
-  });
-}
-
 function setupSettings() {
-  document.getElementById("emotion-add-form").onsubmit = (ev) => {
-    ev.preventDefault();
-    const emoji = document.getElementById("new-emoji").value.trim();
-    const label = document.getElementById("new-label").value.trim();
-    if (!emoji || !label) return;
-    const emotions = loadEmotions();
-    emotions.push({
-      id: "c" + Date.now(),
-      emoji,
-      label,
-      color: EXTRA_COLORS[emotions.length % EXTRA_COLORS.length],
-    });
-    saveEmotions(emotions);
-    ev.target.reset();
-    renderSettings();
-    renderEmotionGrid();
-  };
-  document.getElementById("reset-emotions").onclick = () => {
-    if (!confirm("感情セットを初期状態に戻しますか？（記録は消えません）")) return;
-    saveEmotions(DEFAULT_EMOTIONS.slice());
-    renderSettings();
-    renderEmotionGrid();
-  };
   document.getElementById("export-logs").onclick = () => {
     const blob = new Blob([localStorage.getItem(LS_LOGS) || "[]"], { type: "application/json" });
     const a = document.createElement("a");
@@ -305,7 +276,7 @@ function setupSettings() {
   document.getElementById("delete-all-logs").onclick = () => {
     if (!confirm("すべての記録を削除します。よろしいですか？")) return;
     saveLogs([]);
-    renderTodayLogs();
+    renderRecordScreen();
   };
 }
 
@@ -323,14 +294,13 @@ function setupNav() {
       b.classList.add("active");
       document.getElementById(b.dataset.screen).classList.add("active");
       if (b.dataset.screen === "screen-stats") renderStats();
-      if (b.dataset.screen === "screen-settings") renderSettings();
     };
   });
 }
 
 // ---- init ----
-renderEmotionGrid();
-renderTodayLogs();
+setupPad();
+renderRecordScreen();
 setupNav();
 setupSettings();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
